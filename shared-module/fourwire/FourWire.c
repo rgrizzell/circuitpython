@@ -50,8 +50,13 @@ void common_hal_fourwire_fourwire_construct(fourwire_fourwire_obj_t *self,
     self->polarity = polarity;
     self->phase = phase;
 
-    common_hal_digitalio_digitalinout_construct(&self->chip_select, chip_select);
-    common_hal_digitalio_digitalinout_switch_to_output(&self->chip_select, true, DRIVE_MODE_PUSH_PULL);
+    self->chip_select.base.type = &mp_type_NoneType;
+    if (chip_select != NULL) {
+        self->chip_select.base.type = &digitalio_digitalinout_type;
+        common_hal_digitalio_digitalinout_construct(&self->chip_select, chip_select);
+        common_hal_digitalio_digitalinout_switch_to_output(&self->chip_select, true, DRIVE_MODE_PUSH_PULL);
+        common_hal_never_reset_pin(chip_select);
+    }
 
     self->command.base.type = &mp_type_NoneType;
     if (command != NULL) {
@@ -68,8 +73,6 @@ void common_hal_fourwire_fourwire_construct(fourwire_fourwire_obj_t *self,
         common_hal_never_reset_pin(reset);
         common_hal_fourwire_fourwire_reset(self);
     }
-
-    common_hal_never_reset_pin(chip_select);
 }
 
 void common_hal_fourwire_fourwire_deinit(fourwire_fourwire_obj_t *self) {
@@ -149,10 +152,13 @@ void common_hal_fourwire_fourwire_send(mp_obj_t obj, display_byte_type_t data_ty
         if (bits > 0) {
             buffer = buffer << (8 - bits);
             common_hal_busio_spi_write(self->bus, &buffer, 1);
-            // toggle CS to discard superfluous bits
-            common_hal_digitalio_digitalinout_set_value(&self->chip_select, true);
-            common_hal_mcu_delay_us(1);
-            common_hal_digitalio_digitalinout_set_value(&self->chip_select, false);
+
+            if (self->chip_select.base.type == &digitalio_digitalinout_type) {
+                // toggle CS to discard superfluous bits
+                common_hal_digitalio_digitalinout_set_value(&self->chip_select, true);
+                common_hal_mcu_delay_us(1);
+                common_hal_digitalio_digitalinout_set_value(&self->chip_select, false);
+            }
         }
     } else {
         common_hal_digitalio_digitalinout_set_value(&self->command, data_type == DISPLAY_DATA);
@@ -173,6 +179,8 @@ void common_hal_fourwire_fourwire_send(mp_obj_t obj, display_byte_type_t data_ty
 
 void common_hal_fourwire_fourwire_end_transaction(mp_obj_t obj) {
     fourwire_fourwire_obj_t *self = MP_OBJ_TO_PTR(obj);
-    common_hal_digitalio_digitalinout_set_value(&self->chip_select, true);
+    if (self->chip_select.base.type == &digitalio_digitalinout_type) {
+        common_hal_digitalio_digitalinout_set_value(&self->chip_select, true);
+    }
     common_hal_busio_spi_unlock(self->bus);
 }
